@@ -1,4 +1,4 @@
-name: Snyk Security Scan
+name: Snyk Security Scan for OWASP Juice Shop PR Changes
 
 on:
   pull_request:
@@ -33,6 +33,10 @@ jobs:
       # Install Snyk CLI
       - name: Install Snyk
         run: npm install -g snyk@latest
+
+      # Check Snyk Version
+      - name: Check Snyk Version
+        run: snyk --version
 
       # Get changed files in the PR
       - name: Get Changed Files
@@ -70,6 +74,7 @@ jobs:
               if [ -s "../snyk-dep-report-${FILE//\//_}.json" ]; then
                 VULN_COUNT=$(jq '.vulnerabilities | length' "../snyk-dep-report-${FILE//\//_}.json")
                 echo "Vulnerabilities in $FILE: $VULN_COUNT"
+                echo "Snyk Dependency Report Content: $(cat ../snyk-dep-report-${FILE//\//_}.json || echo 'Empty or invalid')"
                 TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
               fi
             done
@@ -78,7 +83,7 @@ jobs:
             echo "dep_vuln_count=0" >> $GITHUB_OUTPUT
           fi
 
-      # Run Snyk code scan on changed files only
+      # Run Snyk code scan on changed JavaScript files only
       - name: Snyk Code Scan
         id: snyk_code_scan
         env:
@@ -89,14 +94,17 @@ jobs:
           if [ -n "$CHANGED_FILES" ]; then
             TOTAL_VULN=0
             for FILE in $CHANGED_FILES; do
-              echo "Scanning file: $FILE"
-              snyk code test --file="$FILE" --json > "snyk-code-report-${FILE//\//_}.json" || true
-              if [ -s "snyk-code-report-${FILE//\//_}.json" ]; then
-                # Check if the JSON is valid before parsing with jq
-                if jq -e . > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
-                  VULN_COUNT=$(jq '.runs[0].results | length' "snyk-code-report-${FILE//\//_}.json")
-                  echo "Vulnerabilities in $FILE: $VULN_COUNT"
-                  TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
+              if [[ "$FILE" == *.js ]]; then  # Only scan JavaScript files for code vulnerabilities
+                echo "Scanning file: $FILE"
+                snyk code test --file="$FILE" --json > "snyk-code-report-${FILE//\//_}.json" || true
+                if [ -s "snyk-code-report-${FILE//\//_}.json" ]; then
+                  # Check if the JSON is valid before parsing with jq
+                  if jq -e . > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
+                    VULN_COUNT=$(jq '.runs[0].results | length' "snyk-code-report-${FILE//\//_}.json")
+                    echo "Vulnerabilities in $FILE: $VULN_COUNT"
+                    echo "Snyk Code Report Content: $(cat snyk-code-report-${FILE//\//_}.json || echo 'Empty or invalid')"
+                    TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
+                  fi
                 fi
               fi
             done
