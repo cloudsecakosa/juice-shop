@@ -2,7 +2,7 @@
   "name": "vulnerable-juice-shop-test",
   "version": "1.0.0",
   "dependencies": {
-    "express": "4.17.1",
+    "express": "4.16.0",
     "sqlite3": "5.0.0"
   }
 }
