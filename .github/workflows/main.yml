@@ -1,4 +1,4 @@
-name: Snyk Security Scan for OWASP Juice Shop PR Changes
+name: Snyk Security Scan
 
 on:
   pull_request:
@@ -38,9 +38,7 @@ jobs:
       - name: Get Changed Files
         id: changed_files
         run: |
-          # Fetch the target branch (master) explicitly
           git fetch origin master
-          # Get changed files between PR branch and master, ensuring proper path handling
           CHANGED_FILES=$(git diff --name-only origin/master...HEAD | tr '\n' ' ' || true)
           echo "Changed files: $CHANGED_FILES"  # Debug output
           echo "files=$CHANGED_FILES" >> "$GITHUB_OUTPUT"
@@ -89,24 +87,22 @@ jobs:
           CHANGED_FILES="${{ steps.changed_files.outputs.files }}"
           echo "Scanning changed files: $CHANGED_FILES"
           if [ -n "$CHANGED_FILES" ]; then
-            snyk code test $(echo "$CHANGED_FILES" | tr '\n' ' ') --json > snyk-code-report.json || true
-            echo "Snyk Code Report Content: $(cat snyk-code-report.json || echo 'Empty or invalid')"
-            if [ -s snyk-code-report.json ]; then
-              # Check if the JSON is valid before parsing with jq
-              if jq -e . > /dev/null 2>&1 < snyk-code-report.json; then
-                CODE_VULN_COUNT=$(jq '.runs[0].results | length' snyk-code-report.json)
-                echo "code_vuln_count=$CODE_VULN_COUNT" >> $GITHUB_OUTPUT
-              else
-                echo "code_vuln_count=0" >> $GITHUB_OUTPUT
-                echo "{}" > snyk-code-report.json
+            TOTAL_VULN=0
+            for FILE in $CHANGED_FILES; do
+              echo "Scanning file: $FILE"
+              snyk code test --file="$FILE" --json > "snyk-code-report-${FILE//\//_}.json" || true
+              if [ -s "snyk-code-report-${FILE//\//_}.json" ]; then
+                # Check if the JSON is valid before parsing with jq
+                if jq -e . > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
+                  VULN_COUNT=$(jq '.runs[0].results | length' "snyk-code-report-${FILE//\//_}.json")
+                  echo "Vulnerabilities in $FILE: $VULN_COUNT"
+                  TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
+                fi
               fi
-            else
-              echo "code_vuln_count=0" >> $GITHUB_OUTPUT
-              echo "{}" > snyk-code-report.json
-            fi
+            done
+            echo "code_vuln_count=$TOTAL_VULN" >> $GITHUB_OUTPUT
           else
             echo "code_vuln_count=0" >> $GITHUB_OUTPUT
-            echo "{}" > snyk-code-report.json
           fi
 
       # Generate comment based on scan results
@@ -126,7 +122,7 @@ jobs:
           fi
           
           if [ "${{ steps.snyk_code_scan.outputs.code_vuln_count }}" -gt 0 ]; then
-            COMMENT="$COMMENT### Code Vulnerabilities\nFound ${{ steps.snyk_code_scan.outputs.code_vuln_count }} potential vulnerabilities in changed code.\nCheck the snyk-code-report.json artifact for details.\n"
+            COMMENT="$COMMENT### Code Vulnerabilities\nFound ${{ steps.snyk_code_scan.outputs.code_vuln_count }} potential vulnerabilities in changed code.\nCheck the snyk-code-report-*.json artifacts for details.\n"
           else
             COMMENT="$COMMENT### Code Vulnerabilities\nNo vulnerabilities found in changed code.\n"
           fi
@@ -163,4 +159,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: snyk-code-report
-          path: snyk-code-report.json
+          path: snyk-code-report-*.json
