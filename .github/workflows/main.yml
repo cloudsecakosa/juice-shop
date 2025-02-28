@@ -32,24 +32,24 @@ jobs:
 
       # Install Snyk CLI
       - name: Install Snyk
-        run: npm install -g snyk
+        run: npm install -g snyk@latest
 
       # Get changed files in the PR
       - name: Get Changed Files
         id: changed_files
         run: |
-          # Compare PR branch with target branch (master)
           git fetch origin master
           CHANGED_FILES=$(git diff --name-only origin/master...HEAD)
-          echo "files<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+          echo "Changed files: $CHANGED_FILES"  # Add this line for debugging
+
       # Filter package.json and lock files for dependency scan
       - name: Filter Dependency Files
         id: dep_files
         run: |
           DEP_FILES=$(echo "${{ steps.changed_files.outputs.files }}" | grep -E 'package.json|package-lock.json' || true)
           echo "dep_files=$DEP_FILES" >> $GITHUB_OUTPUT
+
       # Run Snyk dependency scan if package files changed
       - name: Snyk Dependency Scan
         id: snyk_dep_scan
@@ -57,13 +57,27 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
-          snyk test --json > snyk-dep-report.json || true
-          if [ -s snyk-dep-report.json ]; then
-            VULN_COUNT=$(jq '.vulnerabilities | length' snyk-dep-report.json)
-            echo "dep_vuln_count=$VULN_COUNT" >> $GITHUB_OUTPUT
+          DEP_FILES="${{ steps.dep_files.outputs.dep_files }}"
+          echo "Scanning dependency files: $DEP_FILES"
+          if [ -n "$DEP_FILES" ]; then
+            TOTAL_VULN=0
+            for FILE in $DEP_FILES; do
+              echo "Scanning file: $FILE"
+              DIR=$(dirname "$FILE")
+              cd "$DIR" || exit 1
+              snyk test --json > "../snyk-dep-report-${FILE//\//_}.json" || true
+              cd - || exit 1
+              if [ -s "../snyk-dep-report-${FILE//\//_}.json" ]; then
+                VULN_COUNT=$(jq '.vulnerabilities | length' "../snyk-dep-report-${FILE//\//_}.json")
+                echo "Vulnerabilities in $FILE: $VULN_COUNT"
+                TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
+              fi
+            done
+            echo "dep_vuln_count=$TOTAL_VULN" >> $GITHUB_OUTPUT
           else
             echo "dep_vuln_count=0" >> $GITHUB_OUTPUT
           fi
+
       # Run Snyk code scan on changed files only
       - name: Snyk Code Scan
         id: snyk_code_scan
@@ -71,8 +85,10 @@ jobs:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
           CHANGED_FILES="${{ steps.changed_files.outputs.files }}"
+          echo "Scanning changed files: $CHANGED_FILES"
           if [ -n "$CHANGED_FILES" ]; then
             snyk code test $(echo "$CHANGED_FILES" | tr '\n' ' ') --json > snyk-code-report.json || true
+            echo "Snyk Code Report Content: $(cat snyk-code-report.json || echo 'Empty or invalid')"
             if [ -s snyk-code-report.json ]; then
               # Check if the JSON is valid before parsing with jq
               if jq -e . > /dev/null 2>&1 < snyk-code-report.json; then
@@ -90,6 +106,7 @@ jobs:
             echo "code_vuln_count=0" >> $GITHUB_OUTPUT
             echo "{}" > snyk-code-report.json
           fi
+
       # Generate comment based on scan results
       - name: Generate Scan Comment
         id: comment
@@ -98,7 +115,7 @@ jobs:
           
           if [ "${{ steps.dep_files.outputs.dep_files }}" != "" ]; then
             if [ "${{ steps.snyk_dep_scan.outputs.dep_vuln_count }}" -gt 0 ]; then
-              COMMENT="$COMMENT### Dependency Vulnerabilities\nFound ${{ steps.snyk_dep_scan.outputs.dep_vuln_count }} vulnerabilities in dependencies (package files changed).\nCheck the snyk-dep-report.json artifact for details.\n\n"
+              COMMENT="$COMMENT### Dependency Vulnerabilities\nFound ${{ steps.snyk_dep_scan.outputs.dep_vuln_count }} vulnerabilities in dependencies (package files changed).\nCheck the snyk-dep-report-*.json artifacts for details.\n\n"
             else
               COMMENT="$COMMENT### Dependency Vulnerabilities\nNo new vulnerabilities found in dependencies (package files changed).\n\n"
             fi
@@ -117,6 +134,7 @@ jobs:
           echo "body<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMENT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
       # Post comment to PR
       - name: Comment on PR
         uses: actions/github-script@v6
@@ -130,13 +148,14 @@ jobs:
               issue_number: context.payload.pull_request.number,
               body: comment
             });
+
       # Upload scan reports as artifacts
       - name: Upload Snyk Dependency Report
         if: steps.dep_files.outputs.dep_files != ''
         uses: actions/upload-artifact@v4
         with:
           name: snyk-dep-report
-          path: snyk-dep-report.json
+          path: snyk-dep-report-*.json
 
       - name: Upload Snyk Code Report
         uses: actions/upload-artifact@v4
