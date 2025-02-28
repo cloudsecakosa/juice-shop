@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: '18'
 
-      # Install dependencies (use npm install instead of npm ci to generate package-lock.json if needed)
+      # Install dependencies
       - name: Install Dependencies
         run: npm install
 
@@ -74,10 +74,17 @@ jobs:
           if [ -n "$CHANGED_FILES" ]; then
             snyk code test $(echo "$CHANGED_FILES" | tr '\n' ' ') --json > snyk-code-report.json || true
             if [ -s snyk-code-report.json ]; then
-              CODE_VULN_COUNT=$(jq '.runs[0].results | length' snyk-code-report.json)
-              echo "code_vuln_count=$CODE_VULN_COUNT" >> $GITHUB_OUTPUT
+              # Check if the JSON is valid before parsing with jq
+              if jq -e . > /dev/null 2>&1 < snyk-code-report.json; then
+                CODE_VULN_COUNT=$(jq '.runs[0].results | length' snyk-code-report.json)
+                echo "code_vuln_count=$CODE_VULN_COUNT" >> $GITHUB_OUTPUT
+              else
+                echo "code_vuln_count=0" >> $GITHUB_OUTPUT
+                echo "{}" > snyk-code-report.json
+              fi
             else
               echo "code_vuln_count=0" >> $GITHUB_OUTPUT
+              echo "{}" > snyk-code-report.json
             fi
           else
             echo "code_vuln_count=0" >> $GITHUB_OUTPUT
