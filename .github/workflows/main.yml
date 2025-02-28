@@ -38,10 +38,12 @@ jobs:
       - name: Get Changed Files
         id: changed_files
         run: |
+          # Fetch the target branch (master) explicitly
           git fetch origin master
-          CHANGED_FILES=$(git diff --name-only origin/master...HEAD)
-          echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
-          echo "Changed files: $CHANGED_FILES"  # Add this line for debugging
+          # Get changed files between PR branch and master, ensuring proper path handling
+          CHANGED_FILES=$(git diff --name-only origin/master...HEAD | tr '\n' ' ' || true)
+          echo "Changed files: $CHANGED_FILES"  # Debug output
+          echo "files=$CHANGED_FILES" >> "$GITHUB_OUTPUT"
 
       # Filter package.json and lock files for dependency scan
       - name: Filter Dependency Files
