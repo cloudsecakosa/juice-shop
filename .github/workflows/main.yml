@@ -1,4 +1,4 @@
-name: Snyk Security Scan for OWASP Juice Shop PR Changes
+name: Snyk Code Scan for OWASP Juice Shop PR Changes
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ on:
       - reopened    # Trigger if PR is reopened
 
 jobs:
-  snyk_security_scan:
+  snyk_code_scan:
     runs-on: ubuntu-latest
     
     steps:
@@ -26,17 +26,9 @@ jobs:
         with:
           node-version: '18'
 
-      # Install dependencies
-      - name: Install Dependencies
-        run: npm install
-
       # Install Snyk CLI
       - name: Install Snyk
         run: npm install -g snyk@latest
-
-      # Check Snyk Version
-      - name: Check Snyk Version
-        run: snyk --version
 
       # Get changed files in the PR
       - name: Get Changed Files
@@ -46,42 +38,6 @@ jobs:
           CHANGED_FILES=$(git diff --name-only origin/master...HEAD | tr '\n' ' ' || true)
           echo "Changed files: $CHANGED_FILES"  # Debug output
           echo "files=$CHANGED_FILES" >> "$GITHUB_OUTPUT"
-
-      # Filter package.json and lock files for dependency scan
-      - name: Filter Dependency Files
-        id: dep_files
-        run: |
-          DEP_FILES=$(echo "${{ steps.changed_files.outputs.files }}" | grep -E 'package.json|package-lock.json' || true)
-          echo "dep_files=$DEP_FILES" >> $GITHUB_OUTPUT
-
-      # Run Snyk dependency scan if package files changed
-      - name: Snyk Dependency Scan
-        id: snyk_dep_scan
-        if: steps.dep_files.outputs.dep_files != ''
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: |
-          DEP_FILES="${{ steps.dep_files.outputs.dep_files }}"
-          echo "Scanning dependency files: $DEP_FILES"
-          if [ -n "$DEP_FILES" ]; then
-            TOTAL_VULN=0
-            for FILE in $DEP_FILES; do
-              echo "Scanning file: $FILE"
-              DIR=$(dirname "$FILE")
-              cd "$DIR" || exit 1
-              snyk test --json > "../snyk-dep-report-${FILE//\//_}.json" || true
-              cd - || exit 1
-              if [ -s "../snyk-dep-report-${FILE//\//_}.json" ]; then
-                VULN_COUNT=$(jq '.vulnerabilities | length' "../snyk-dep-report-${FILE//\//_}.json")
-                echo "Vulnerabilities in $FILE: $VULN_COUNT"
-                echo "Snyk Dependency Report Content: $(cat ../snyk-dep-report-${FILE//\//_}.json || echo 'Empty or invalid')"
-                TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
-              fi
-            done
-            echo "dep_vuln_count=$TOTAL_VULN" >> $GITHUB_OUTPUT
-          else
-            echo "dep_vuln_count=0" >> $GITHUB_OUTPUT
-          fi
 
       # Run Snyk code scan on changed JavaScript files only
       - name: Snyk Code Scan
@@ -117,17 +73,7 @@ jobs:
       - name: Generate Scan Comment
         id: comment
         run: |
-          COMMENT="## Snyk Security Scan Results for OWASP Juice Shop PR Changes\n\n"
-          
-          if [ "${{ steps.dep_files.outputs.dep_files }}" != "" ]; then
-            if [ "${{ steps.snyk_dep_scan.outputs.dep_vuln_count }}" -gt 0 ]; then
-              COMMENT="$COMMENT### Dependency Vulnerabilities\nFound ${{ steps.snyk_dep_scan.outputs.dep_vuln_count }} vulnerabilities in dependencies (package files changed).\nCheck the snyk-dep-report-*.json artifacts for details.\n\n"
-            else
-              COMMENT="$COMMENT### Dependency Vulnerabilities\nNo new vulnerabilities found in dependencies (package files changed).\n\n"
-            fi
-          else
-            COMMENT="$COMMENT### Dependency Vulnerabilities\nNo package files modified in this PR.\n\n"
-          fi
+          COMMENT="## Snyk Code Scan Results for OWASP Juice Shop PR Changes\n\n"
           
           if [ "${{ steps.snyk_code_scan.outputs.code_vuln_count }}" -gt 0 ]; then
             COMMENT="$COMMENT### Code Vulnerabilities\nFound ${{ steps.snyk_code_scan.outputs.code_vuln_count }} potential vulnerabilities in changed code.\nCheck the snyk-code-report-*.json artifacts for details.\n"
@@ -156,13 +102,6 @@ jobs:
             });
 
       # Upload scan reports as artifacts
-      - name: Upload Snyk Dependency Report
-        if: steps.dep_files.outputs.dep_files != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: snyk-dep-report
-          path: snyk-dep-report-*.json
-
       - name: Upload Snyk Code Report
         uses: actions/upload-artifact@v4
         with:
