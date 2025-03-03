@@ -93,7 +93,7 @@ jobs:
             echo "code_vuln_count=0" >> $GITHUB_OUTPUT
           fi
 
-      # Generate comment based on scan results for changed JavaScript files only, with neat formatting
+      # Generate comment based on scan results for changed JavaScript files only, with header and summary
       - name: Generate Scan Comment
         id: comment
         run: |
@@ -110,14 +110,16 @@ jobs:
                   if [ "$VULN_COUNT" -gt 0 ]; then
                     VULN_FOUND=true
                     COMMENT="$COMMENT### Vulnerabilities in $FILE\nFound $VULN_COUNT potential vulnerabilities in this file:\n"
-                    # List each vulnerability in a neat bullet-point format
+                    # List only vulnerability text and affected code lines
                     for ((i=0; i<$VULN_COUNT; i++)); do
-                      RULE_ID=$(jq -r '.runs[0].results['"$i"'].ruleId' "$REPORT_FILE")
-                      MESSAGE=$(jq -r '.runs[0].results['"$i"'].message.text' "$REPORT_FILE" | head -c 100)  # Truncate long messages
-                      LOCATION=$(jq -r '.runs[0].results['"$i"'].locations[0].physicalLocation.region.startLine' "$REPORT_FILE")
-                      COMMENT="$COMMENT- **$RULE_ID** (Line $LOCATION): $MESSAGE...\n"
+                      VULN_TEXT=$(jq -r '.runs[0].results['"$i"'].message.text' "$REPORT_FILE")
+                      START_LINE=$(jq -r '.runs[0].results['"$i"'].locations[0].physicalLocation.region.startLine' "$REPORT_FILE")
+                      END_LINE=$(jq -r '.runs[0].results['"$i"'].locations[0].physicalLocation.region.endLine' "$REPORT_FILE")
+                      # Fetch the code snippet from the file (lines START_LINE to END_LINE)
+                      CODE_SNIPPET=$(sed -n "${START_LINE},${END_LINE}p" "$FILE" | awk '{printf "- %s\n", $0}')
+                      COMMENT="$COMMENT- $VULN_TEXT\n  Code:\n$CODE_SNIPPET\n"
                     done
-                    COMMENT="$COMMENTTo view full details, download the snyk-code-report-${FILE//\//_}.json artifact from the GitHub Actions run and use a JSON viewer or 'jq' tool (e.g., `jq '.runs[0].results[] | {ruleId, message, locations}' snyk-code-report-${FILE//\//_}.json`).\n\n"
+                    COMMENT="$COMMENTTo view full details, download the snyk-code-report-${FILE//\//_}.json artifact from the GitHub Actions run and use a JSON viewer or 'jq' tool.\n\n"
                   fi
                 fi
               fi
