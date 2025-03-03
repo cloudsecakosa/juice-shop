@@ -93,7 +93,7 @@ jobs:
             echo "code_vuln_count=0" >> $GITHUB_OUTPUT
           fi
 
-      # Generate comment based on scan results for changed JavaScript files only, simplified for developers
+      # Generate comment based on scan results for changed JavaScript files only, with simplified, focused output
       - name: Generate Scan Comment
         id: comment
         run: |
@@ -109,8 +109,15 @@ jobs:
                   VULN_COUNT=$(jq '.runs[0].results | length' "$REPORT_FILE")
                   if [ "$VULN_COUNT" -gt 0 ]; then
                     VULN_FOUND=true
-                    # Simplified comment without severity specification
-                    COMMENT="$COMMENT### Vulnerabilities in $FILE\nFound $VULN_COUNT potential vulnerabilities in this file.\nTo view details, download the snyk-code-report-${FILE//\//_}.json artifact from the GitHub Actions run and use a JSON viewer or 'jq' tool (e.g., `jq '.runs[0].results[] | {ruleId, message, locations}' snyk-code-report-${FILE//\//_}.json`).\n\n"
+                    # Keep header and summary, then list vulnerabilities with text and line range
+                    COMMENT="$COMMENT### Vulnerabilities in $FILE\nFound $VULN_COUNT potential vulnerabilities in this file:\n"
+                    for ((i=0; i<$VULN_COUNT; i++)); do
+                      VULN_TEXT=$(jq -r '.runs[0].results['"$i"'].message.text' "$REPORT_FILE")
+                      START_LINE=$(jq -r '.runs[0].results['"$i"'].locations[0].physicalLocation.region.startLine' "$REPORT_FILE")
+                      END_LINE=$(jq -r '.runs[0].results['"$i"'].locations[0].physicalLocation.region.endLine' "$REPORT_FILE")
+                      COMMENT="$COMMENT- $VULN_TEXT (Lines $START_LINE–$END_LINE)\n"
+                    done
+                    COMMENT="$COMMENTTo view details, download the snyk-code-report-${FILE//\//_}.json artifact from GitHub Actions.\n\n"
                   fi
                 fi
               fi
