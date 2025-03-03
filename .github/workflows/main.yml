@@ -66,30 +66,36 @@ jobs:
                 fi
                 # Check if Snyk scanned only the specified file by inspecting the report
                 if [ -s "snyk-code-report-${FILE//\//_}.json" ]; then
-                  # Parse the report to ensure only the specified file has vulnerabilities
-                  if jq -e '.runs[0].results | map(.locations[].physicalLocation.artifactLocation.uri) | unique | . == ["'"$FILE"'"]' > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
-                    echo "Confirmed scan limited to $FILE"
-                    if jq -e . > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
-                      VULN_COUNT=$(jq '.runs[0].results | length' "snyk-code-report-${FILE//\//_}.json")
-                      echo "Vulnerabilities in $FILE: $VULN_COUNT"
-                      echo "Snyk Code Report Content: $(cat snyk-code-report-${FILE//\//_}.json || echo 'Empty or invalid')"
-                      TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
+                  # Validate SARIF structure and debug
+                  echo "Validating Snyk report for $FILE"
+                  if jq -e '.runs[0].results' > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
+                    # Parse the report to ensure only the specified file has vulnerabilities
+                    if jq -e '.runs[0].results | map(.locations[].physicalLocation.artifactLocation.uri) | unique | . == ["'"$FILE"'"]' > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
+                      echo "Confirmed scan limited to $FILE"
+                      if jq -e . > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
+                        VULN_COUNT=$(jq '.runs[0].results | length' "snyk-code-report-${FILE//\//_}.json")
+                        echo "Vulnerabilities in $FILE: $VULN_COUNT"
+                        echo "Snyk Code Report Content: $(cat snyk-code-report-${FILE//\//_}.json || echo 'Empty or invalid')"
+                        TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
+                      else
+                        echo "Invalid JSON in snyk-code-report-${FILE//\//_}.json, skipping"
+                      fi
                     else
-                      echo "Invalid JSON in snyk-code-report-${FILE//\//_}.json, skipping"
+                      echo "Warning: Snyk scanned files beyond $FILE. Limiting report to $FILE only."
+                      # Filter results to only include vulnerabilities in $FILE
+                      jq 'del(.runs[].results[] | select(.locations[].physicalLocation.artifactLocation.uri != "'"$FILE"'"))' "snyk-code-report-${FILE//\//_}.json" > "filtered-snyk-code-report-${FILE//\//_}.json"
+                      if [ -s "filtered-snyk-code-report-${FILE//\//_}.json" ] && jq -e . > /dev/null 2>&1 < "filtered-snyk-code-report-${FILE//\//_}.json"; then
+                        VULN_COUNT=$(jq '.runs[0].results | length' "filtered-snyk-code-report-${FILE//\//_}.json")
+                        echo "Vulnerabilities in $FILE after filtering: $VULN_COUNT"
+                        echo "Filtered Snyk Code Report Content: $(cat filtered-snyk-code-report-${FILE//\//_}.json || echo 'Empty or invalid')"
+                        TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
+                        mv "filtered-snyk-code-report-${FILE//\//_}.json" "snyk-code-report-${FILE//\//_}.json"
+                      else
+                        echo "No vulnerabilities found in $FILE after filtering"
+                      fi
                     fi
                   else
-                    echo "Warning: Snyk scanned files beyond $FILE. Limiting report to $FILE only."
-                    # Filter results to only include vulnerabilities in $FILE
-                    jq 'del(.runs[].results[] | select(.locations[].physicalLocation.artifactLocation.uri != "'"$FILE"'"))' "snyk-code-report-${FILE//\//_}.json" > "filtered-snyk-code-report-${FILE//\//_}.json"
-                    if [ -s "filtered-snyk-code-report-${FILE//\//_}.json" ] && jq -e . > /dev/null 2>&1 < "filtered-snyk-code-report-${FILE//\//_}.json"; then
-                      VULN_COUNT=$(jq '.runs[0].results | length' "filtered-snyk-code-report-${FILE//\//_}.json")
-                      echo "Vulnerabilities in $FILE after filtering: $VULN_COUNT"
-                      echo "Filtered Snyk Code Report Content: $(cat filtered-snyk-code-report-${FILE//\//_}.json || echo 'Empty or invalid')"
-                      TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
-                      mv "filtered-snyk-code-report-${FILE//\//_}.json" "snyk-code-report-${FILE//\//_}.json"
-                    else
-                      echo "No vulnerabilities found in $FILE after filtering"
-                    fi
+                    echo "Warning: Snyk report for $FILE has no results or invalid structure"
                   fi
                 else
                   echo "No vulnerabilities found or scan failed for $FILE"
@@ -101,7 +107,7 @@ jobs:
             echo "code_vuln_count=0" >> $GITHUB_OUTPUT
           fi
 
-      # Generate comment based on scan results for changed JavaScript files only, with desired format
+      # Generate comment based on scan results for changed JavaScript files only, with corrected format
       - name: Generate Scan Comment
         id: comment
         run: |
@@ -114,19 +120,22 @@ jobs:
               if [[ "$FILE" == *.js ]]; then  # Only consider JavaScript files
                 REPORT_FILE="snyk-code-report-${FILE//\//_}.json"
                 if [ -s "$REPORT_FILE" ] && jq -e . > /dev/null 2>&1 < "$REPORT_FILE"; then
-                  VULN_COUNT=$(jq '.runs[0].results | length' "$REPORT_FILE")
+                  # Ensure VULN_COUNT is calculated correctly, even if results are empty
+                  VULN_COUNT=$(jq '.runs[0].results | length // 0' "$REPORT_FILE" 2>/dev/null || echo 0)
                   if [ "$VULN_COUNT" -gt 0 ]; then
                     VULN_FOUND=true
                     # Use the desired format with header, summary, and simplified vulnerability reporting
                     COMMENT="$COMMENT### Vulnerabilities in $FILE\nFound $VULN_COUNT potential vulnerabilities in this file:\n"
                     for ((i=0; i<$VULN_COUNT; i++)); do
-                      VULN_TEXT=$(jq -r '.runs[0].results['"$i"'].message.text' "$REPORT_FILE")
-                      START_LINE=$(jq -r '.runs[0].results['"$i"'].locations[0].physicalLocation.region.startLine' "$REPORT_FILE")
-                      END_LINE=$(jq -r '.runs[0].results['"$i"'].locations[0].physicalLocation.region.endLine' "$REPORT_FILE")
+                      VULN_TEXT=$(jq -r '.runs[0].results['"$i"'].message.text // "No description available"' "$REPORT_FILE" 2>/dev/null || echo "No description available")
+                      START_LINE=$(jq -r '.runs[0].results['"$i"'].locations[0].physicalLocation.region.startLine // "Unknown"' "$REPORT_FILE" 2>/dev/null || echo "Unknown")
+                      END_LINE=$(jq -r '.runs[0].results['"$i"'].locations[0].physicalLocation.region.endLine // "Unknown"' "$REPORT_FILE" 2>/dev/null || echo "Unknown")
                       COMMENT="$COMMENT- $VULN_TEXT (Lines $START_LINE–$END_LINE)\n"
                     done
                     COMMENT="$COMMENTTo view details, download the snyk-code-report-${FILE//\//_}.json artifact from GitHub Actions.\n\n"
                   fi
+                else
+                  echo "Report file $REPORT_FILE is empty or invalid, skipping"
                 fi
               fi
             done
