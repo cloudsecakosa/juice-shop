@@ -52,7 +52,10 @@ jobs:
             for FILE in $CHANGED_FILES; do
               if [[ "$FILE" == *.js ]]; then  # Only scan JavaScript files for code vulnerabilities
                 echo "Scanning file: $FILE"
+                # Use --file explicitly and ensure Snyk only scans the specified file
                 snyk code test --file="$FILE" --json > "snyk-code-report-${FILE//\//_}.json" || true
+                # Debug: Show Snyk command output
+                echo "Snyk command output for $FILE: $(snyk code test --file="$FILE" 2>&1 || echo 'No output')"
                 if [ -s "snyk-code-report-${FILE//\//_}.json" ]; then
                   # Check if the JSON is valid before parsing with jq
                   if jq -e . > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
@@ -60,7 +63,11 @@ jobs:
                     echo "Vulnerabilities in $FILE: $VULN_COUNT"
                     echo "Snyk Code Report Content: $(cat snyk-code-report-${FILE//\//_}.json || echo 'Empty or invalid')"
                     TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
+                  else
+                    echo "Invalid JSON in snyk-code-report-${FILE//\//_}.json, skipping"
                   fi
+                else
+                  echo "No vulnerabilities found or scan failed for $FILE"
                 fi
               fi
             done
