@@ -72,7 +72,6 @@ jobs:
           COMMENT="## Snyk Code Scan Results for OWASP Juice Shop PR Changes
 
 "
-
           CHANGED_FILES="${{ steps.changed_files.outputs.files }}"
           if [ -n "$CHANGED_FILES" ]; then
             VULN_FOUND=false
