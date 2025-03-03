@@ -66,7 +66,7 @@ jobs:
                 fi
                 # Scan without severity threshold to report all vulnerabilities, with detailed output
                 snyk code test --file="$FILE" --json > "snyk-code-report-${FILE//\//_}.json" 2> "snyk-code-log-${FILE//\//_}.txt" || true
-                # Debug: Show Snyk command output and log file
+                # Debug: Show Snyk command output, log file, and verify file existence
                 echo "Snyk command output for $FILE: $(cat snyk-code-log-${FILE//\//_}.txt || echo 'No output')"
                 # Check if Snyk scanned only the specified file by inspecting the report
                 if [ -s "snyk-code-report-${FILE//\//_}.json" ]; then
@@ -100,16 +100,20 @@ jobs:
                 fi
               fi
             done
-            echo "code_vuln_count=$TOTAL_VULN" >> $GITHUB_OUTPUT
+            echo "code_vuln_count=$TOTAL_VULN" >> "$GITHUB_OUTPUT"
           else
-            echo "code_vuln_count=0" >> $GITHUB_OUTPUT
+            echo "code_vuln_count=0" >> "$GITHUB_OUTPUT"
           fi
 
-      # Generate comment based on scan results for changed JavaScript files only, with simplified, focused output
+      # Generate comment based on scan results for changed JavaScript files only, with fixed heredoc and desired format
       - name: Generate Scan Comment
         id: comment
         run: |
-          COMMENT="## Snyk Code Scan Results for OWASP Juice Shop PR Changes\n\n"
+          cat << 'EOF' > "$GITHUB_OUTPUT"
+          body<<EOF
+          ## Snyk Code Scan Results for OWASP Juice Shop PR Changes
+
+          EOF
           
           CHANGED_FILES="${{ steps.changed_files.outputs.files }}"
           if [ -n "$CHANGED_FILES" ]; then
@@ -122,7 +126,7 @@ jobs:
                   VULN_COUNT=$(jq '.runs[0].results | length // 0' "$REPORT_FILE" 2>/dev/null || echo 0)
                   if [ "$VULN_COUNT" -gt 0 ]; then
                     VULN_FOUND=true
-                    COMMENT="$COMMENT### Vulnerabilities in \"$FILE\"\nFound $VULN_COUNT potential vulnerabilities in this file:\n"
+                    COMMENT="### Vulnerabilities in \"$FILE\"\nFound $VULN_COUNT potential vulnerabilities in this file:\n"
                     # List vulnerabilities with text and line range for simplicity
                     for ((i=0; i<$VULN_COUNT; i++)); do
                       VULN_TEXT=$(jq -r '.runs[0].results['"$i"'].message.text // "No description available"' "$REPORT_FILE" 2>/dev/null || echo "No description available")
@@ -130,23 +134,21 @@ jobs:
                       END_LINE=$(jq -r '.runs[0].results['"$i"'].locations[0].physicalLocation.region.endLine // "Unknown"' "$REPORT_FILE" 2>/dev/null || echo "Unknown")
                       COMMENT="$COMMENT- $VULN_TEXT (Lines $START_LINE–$END_LINE)\n"
                     done
-                    COMMENT="$COMMENTTo view details, download the \"snyk-code-report-${FILE//\//_}.json\" artifact from GitHub Actions.\n\n"
+                    echo "$COMMENTTo view details, download the \"snyk-code-report-${FILE//\//_}.json\" artifact from GitHub Actions.\n\n" >> "$GITHUB_OUTPUT"
                   fi
                 else
-                  echo "Report file $REPORT_FILE is empty or invalid, skipping"
+                  echo "Report file $REPORT_FILE is empty or invalid, skipping" >&2
                 fi
               fi
             done
             if [ "$VULN_FOUND" = false ]; then
-              COMMENT="$COMMENT### Code Vulnerabilities\nNo vulnerabilities found in changed JavaScript code.\n"
+              echo "### Code Vulnerabilities\nNo vulnerabilities found in changed JavaScript code.\n" >> "$GITHUB_OUTPUT"
             fi
           else
-            COMMENT="$COMMENT### Code Vulnerabilities\nNo changed files detected in this PR.\n"
+            echo "### Code Vulnerabilities\nNo changed files detected in this PR.\n" >> "$GITHUB_OUTPUT"
           fi
-          
-          echo "body<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$COMMENT"
-          echo "EOF"
+          EOF
+          EOF
 
       # Post comment to PR
       - name: Comment on PR
