@@ -39,7 +39,7 @@ jobs:
           echo "Changed files: $CHANGED_FILES"  # Debug output
           echo "files=$CHANGED_FILES" >> "$GITHUB_OUTPUT"
 
-      # Run Snyk code scan on changed JavaScript files only, with strict file isolation
+      # Run Snyk code scan on changed JavaScript files only
       - name: Snyk Code Scan
         id: snyk_code_scan
         env:
@@ -52,8 +52,8 @@ jobs:
             for FILE in $CHANGED_FILES; do
               if [[ "$FILE" == *.js ]]; then  # Only scan JavaScript files for code vulnerabilities
                 echo "Scanning file: $FILE"
-                # Use --file explicitly, limit severity to high/critical, and restrict to single file
-                snyk code test --file="$FILE" --severity-threshold=high --json > "snyk-code-report-${FILE//\//_}.json" 2> "snyk-code-log-${FILE//\//_}.txt" || true
+                # Remove --severity-threshold=high to report all vulnerabilities
+                snyk code test --file="$FILE" --json > "snyk-code-report-${FILE//\//_}.json" 2> "snyk-code-log-${FILE//\//_}.txt" || true
                 # Debug: Show Snyk command output and log file
                 echo "Snyk command output for $FILE: $(cat snyk-code-log-${FILE//\//_}.txt || echo 'No output')"
                 # Check if Snyk scanned only the specified file by inspecting the report
@@ -93,7 +93,7 @@ jobs:
             echo "code_vuln_count=0" >> $GITHUB_OUTPUT
           fi
 
-      # Generate comment based on scan results for changed JavaScript files only
+      # Generate comment based on scan results for changed JavaScript files only, reporting all severities
       - name: Generate Scan Comment
         id: comment
         run: |
@@ -109,13 +109,13 @@ jobs:
                   VULN_COUNT=$(jq '.runs[0].results | length' "$REPORT_FILE")
                   if [ "$VULN_COUNT" -gt 0 ]; then
                     VULN_FOUND=true
-                    COMMENT="$COMMENT### Vulnerabilities in $FILE\nFound $VULN_COUNT potential vulnerabilities in this file (severity: high or critical).\nCheck the snyk-code-report-${FILE//\//_}.json artifact for details.\n\n"
+                    COMMENT="$COMMENT### Vulnerabilities in $FILE\nFound $VULN_COUNT potential vulnerabilities in this file (all severities).\nCheck the snyk-code-report-${FILE//\//_}.json artifact for details.\n\n"
                   fi
                 fi
               fi
             done
             if [ "$VULN_FOUND" = false ]; then
-              COMMENT="$COMMENT### Code Vulnerabilities\nNo high/critical vulnerabilities found in changed JavaScript code.\n"
+              COMMENT="$COMMENT### Code Vulnerabilities\nNo vulnerabilities found in changed JavaScript code.\n"
             fi
           else
             COMMENT="$COMMENT### Code Vulnerabilities\nNo changed files detected in this PR.\n"
