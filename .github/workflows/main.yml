@@ -41,14 +41,11 @@ jobs:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
           CHANGED_FILES="${{ steps.changed_files.outputs.files }}"
-          echo "Scanning changed files: $CHANGED_FILES"
           if [ -n "$CHANGED_FILES" ]; then
             TOTAL_VULN=0
             for FILE in $CHANGED_FILES; do
               if [[ "$FILE" == *.js ]]; then
-                echo "Scanning file: $FILE"
                 snyk code test --file="$FILE" --json > "snyk-code-report-${FILE//\//_}.json" 2> "snyk-code-log-${FILE//\//_}.txt" || true
-
                 if [ -s "snyk-code-report-${FILE//\//_}.json" ]; then
                   if jq -e '.runs[0].results | map(.locations[].physicalLocation.artifactLocation.uri) | unique | . == ["'"$FILE"'"]' > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
                     VULN_COUNT=$(jq '.runs[0].results | length' "snyk-code-report-${FILE//\//_}.json")
@@ -72,7 +69,9 @@ jobs:
       - name: Generate Scan Comment
         id: comment
         run: |
-          COMMENT="## Snyk Code Scan Results for OWASP Juice Shop PR Changes\n\n"
+          COMMENT="## Snyk Code Scan Results for OWASP Juice Shop PR Changes
+
+"
 
           CHANGED_FILES="${{ steps.changed_files.outputs.files }}"
           if [ -n "$CHANGED_FILES" ]; then
@@ -84,27 +83,32 @@ jobs:
                   VULN_COUNT=$(jq '.runs[0].results | length' "$REPORT_FILE")
                   if [ "$VULN_COUNT" -gt 0 ]; then
                     VULN_FOUND=true
-                    COMMENT="$COMMENT### Vulnerabilities in \`$FILE\`\n\n"
-                    COMMENT="$COMMENTFound $VULN_COUNT potential vulnerabilities in this file.\n"
-                    COMMENT="$COMMENTTo view details, download the \`snyk-code-report-${FILE//\//_}.json\` artifact from GitHub Actions.\n\n"
+                    COMMENT+="### Vulnerabilities in \`$FILE\`
+
+"
+                    COMMENT+="Found $VULN_COUNT potential vulnerabilities in this file.
+To view details, download the \`$REPORT_FILE\` artifact from GitHub Actions.
+
+"
 
                     jq -c '.runs[0].results[]' "$REPORT_FILE" | while read -r vuln; do
                       RULE_ID=$(echo "$vuln" | jq -r '.ruleId')
                       DESCRIPTION=$(echo "$vuln" | jq -r '.message.text')
-
                       START_LINE=$(echo "$vuln" | jq -r '.locations[0].physicalLocation.region.startLine')
                       END_LINE=$(echo "$vuln" | jq -r '.locations[0].physicalLocation.region.endLine')
                       START_COLUMN=$(echo "$vuln" | jq -r '.locations[0].physicalLocation.region.startColumn')
                       END_COLUMN=$(echo "$vuln" | jq -r '.locations[0].physicalLocation.region.endColumn')
 
-                      COMMENT="$COMMENT### ⚠️ Vulnerability\n"
-                      COMMENT="$COMMENT- **Rule ID:** $RULE_ID\n"
-                      COMMENT="$COMMENT- **Description:** $DESCRIPTION\n"
-                      COMMENT="$COMMENT- **Location:**\n"
-                      COMMENT="$COMMENT    - **Start Line:** $START_LINE\n"
-                      COMMENT="$COMMENT    - **End Line:** $END_LINE\n"
-                      COMMENT="$COMMENT    - **Start Column:** $START_COLUMN\n"
-                      COMMENT="$COMMENT    - **End Column:** $END_COLUMN\n\n"
+                      COMMENT+="### ⚠️ Vulnerability
+- **Rule ID:** $RULE_ID
+- **Description:** $DESCRIPTION
+- **Location:**
+    - **Start Line:** $START_LINE
+    - **End Line:** $END_LINE
+    - **Start Column:** $START_COLUMN
+    - **End Column:** $END_COLUMN
+
+"
                     done
                   fi
                 fi
@@ -112,15 +116,23 @@ jobs:
             done
 
             if [ "$VULN_FOUND" = false ]; then
-              COMMENT="$COMMENT### Code Vulnerabilities\nNo vulnerabilities found in changed JavaScript code.\n"
+              COMMENT+="### Code Vulnerabilities
+No vulnerabilities found in changed JavaScript code.
+
+"
             fi
           else
-            COMMENT="$COMMENT### Code Vulnerabilities\nNo changed files detected in this PR.\n"
+            COMMENT+="### Code Vulnerabilities
+No changed files detected in this PR.
+
+"
           fi
 
-          echo "body<<EOF" >> $GITHUB_OUTPUT
-          echo "$COMMENT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          {
+            echo "body<<EOF"
+            echo "$COMMENT"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Comment on PR
         uses: actions/github-script@v6
