@@ -30,6 +30,10 @@ jobs:
       - name: Install Snyk
         run: npm install -g snyk@latest
 
+      # Check Snyk Version
+      - name: Check Snyk Version
+        run: snyk --version
+
       # Get changed files in the PR
       - name: Get Changed Files
         id: changed_files
@@ -39,7 +43,7 @@ jobs:
           echo "Changed files: $CHANGED_FILES"  # Debug output
           echo "files=$CHANGED_FILES" >> "$GITHUB_OUTPUT"
 
-      # Run Snyk code scan on changed JavaScript files only
+      # Run Snyk code scan on changed JavaScript files only, with enhanced debugging
       - name: Snyk Code Scan
         id: snyk_code_scan
         env:
@@ -52,10 +56,14 @@ jobs:
             for FILE in $CHANGED_FILES; do
               if [[ "$FILE" == *.js ]]; then  # Only scan JavaScript files for code vulnerabilities
                 echo "Scanning file: $FILE"
-                # Scan without severity threshold to report all vulnerabilities
+                # Scan without severity threshold to report all vulnerabilities, with detailed output
                 snyk code test --file="$FILE" --json > "snyk-code-report-${FILE//\//_}.json" 2> "snyk-code-log-${FILE//\//_}.txt" || true
-                # Debug: Show Snyk command output and log file
+                # Debug: Show Snyk command output, log file, and verify file existence
                 echo "Snyk command output for $FILE: $(cat snyk-code-log-${FILE//\//_}.txt || echo 'No output')"
+                if [ ! -f "$FILE" ]; then
+                  echo "Error: File $FILE not found in repository"
+                  continue
+                fi
                 # Check if Snyk scanned only the specified file by inspecting the report
                 if [ -s "snyk-code-report-${FILE//\//_}.json" ]; then
                   # Parse the report to ensure only the specified file has vulnerabilities
@@ -93,7 +101,7 @@ jobs:
             echo "code_vuln_count=0" >> $GITHUB_OUTPUT
           fi
 
-      # Generate comment based on scan results for changed JavaScript files only, with simplified, focused output
+      # Generate comment based on scan results for changed JavaScript files only, with desired format
       - name: Generate Scan Comment
         id: comment
         run: |
@@ -109,7 +117,7 @@ jobs:
                   VULN_COUNT=$(jq '.runs[0].results | length' "$REPORT_FILE")
                   if [ "$VULN_COUNT" -gt 0 ]; then
                     VULN_FOUND=true
-                    # Keep header and summary, then list vulnerabilities with text and line range
+                    # Use the desired format with header, summary, and simplified vulnerability reporting
                     COMMENT="$COMMENT### Vulnerabilities in $FILE\nFound $VULN_COUNT potential vulnerabilities in this file:\n"
                     for ((i=0; i<$VULN_COUNT; i++)); do
                       VULN_TEXT=$(jq -r '.runs[0].results['"$i"'].message.text' "$REPORT_FILE")
