@@ -51,7 +51,6 @@ jobs:
 
                 if [ -s "snyk-code-report-${FILE//\//_}.json" ]; then
                   if jq -e '.runs[0].results | map(.locations[].physicalLocation.artifactLocation.uri) | unique | . == ["'"$FILE"'"]' > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
-                    echo "Confirmed scan limited to $FILE"
                     VULN_COUNT=$(jq '.runs[0].results | length' "snyk-code-report-${FILE//\//_}.json")
                     TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
                   else
@@ -125,10 +124,12 @@ jobs:
 
       - name: Comment on PR
         uses: actions/github-script@v6
+        env:
+          COMMENT_BODY: ${{ steps.comment.outputs.body }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const comment = `${{ steps.comment.outputs.body }}`;
+            const comment = process.env.COMMENT_BODY;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
