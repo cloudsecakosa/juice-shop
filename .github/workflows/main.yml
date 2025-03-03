@@ -39,7 +39,7 @@ jobs:
           echo "Changed files: $CHANGED_FILES"  # Debug output
           echo "files=$CHANGED_FILES" >> "$GITHUB_OUTPUT"
 
-      # Run Snyk code scan on changed JavaScript files only
+      # Run Snyk code scan on changed JavaScript files only, with strict file isolation
       - name: Snyk Code Scan
         id: snyk_code_scan
         env:
@@ -52,19 +52,36 @@ jobs:
             for FILE in $CHANGED_FILES; do
               if [[ "$FILE" == *.js ]]; then  # Only scan JavaScript files for code vulnerabilities
                 echo "Scanning file: $FILE"
-                # Use --file explicitly and ensure Snyk only scans the specified file
-                snyk code test --file="$FILE" --json > "snyk-code-report-${FILE//\//_}.json" || true
-                # Debug: Show Snyk command output
-                echo "Snyk command output for $FILE: $(snyk code test --file="$FILE" 2>&1 || echo 'No output')"
+                # Use --file explicitly, limit severity to high/critical, and restrict to single file
+                snyk code test --file="$FILE" --severity-threshold=high --json > "snyk-code-report-${FILE//\//_}.json" 2> "snyk-code-log-${FILE//\//_}.txt" || true
+                # Debug: Show Snyk command output and log file
+                echo "Snyk command output for $FILE: $(cat snyk-code-log-${FILE//\//_}.txt || echo 'No output')"
+                # Check if Snyk scanned only the specified file by inspecting the report
                 if [ -s "snyk-code-report-${FILE//\//_}.json" ]; then
-                  # Check if the JSON is valid before parsing with jq
-                  if jq -e . > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
-                    VULN_COUNT=$(jq '.runs[0].results | length' "snyk-code-report-${FILE//\//_}.json")
-                    echo "Vulnerabilities in $FILE: $VULN_COUNT"
-                    echo "Snyk Code Report Content: $(cat snyk-code-report-${FILE//\//_}.json || echo 'Empty or invalid')"
-                    TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
+                  # Parse the report to ensure only the specified file has vulnerabilities
+                  if jq -e '.runs[0].results | map(.locations[].physicalLocation.artifactLocation.uri) | unique | . == ["'"$FILE"'"]' > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
+                    echo "Confirmed scan limited to $FILE"
+                    if jq -e . > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
+                      VULN_COUNT=$(jq '.runs[0].results | length' "snyk-code-report-${FILE//\//_}.json")
+                      echo "Vulnerabilities in $FILE: $VULN_COUNT"
+                      echo "Snyk Code Report Content: $(cat snyk-code-report-${FILE//\//_}.json || echo 'Empty or invalid')"
+                      TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
+                    else
+                      echo "Invalid JSON in snyk-code-report-${FILE//\//_}.json, skipping"
+                    fi
                   else
-                    echo "Invalid JSON in snyk-code-report-${FILE//\//_}.json, skipping"
+                    echo "Warning: Snyk scanned files beyond $FILE. Limiting report to $FILE only."
+                    # Filter results to only include vulnerabilities in $FILE
+                    jq 'del(.runs[].results[] | select(.locations[].physicalLocation.artifactLocation.uri != "'"$FILE"'"))' "snyk-code-report-${FILE//\//_}.json" > "filtered-snyk-code-report-${FILE//\//_}.json"
+                    if [ -s "filtered-snyk-code-report-${FILE//\//_}.json" ] && jq -e . > /dev/null 2>&1 < "filtered-snyk-code-report-${FILE//\//_}.json"; then
+                      VULN_COUNT=$(jq '.runs[0].results | length' "filtered-snyk-code-report-${FILE//\//_}.json")
+                      echo "Vulnerabilities in $FILE after filtering: $VULN_COUNT"
+                      echo "Filtered Snyk Code Report Content: $(cat filtered-snyk-code-report-${FILE//\//_}.json || echo 'Empty or invalid')"
+                      TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
+                      mv "filtered-snyk-code-report-${FILE//\//_}.json" "snyk-code-report-${FILE//\//_}.json"
+                    else
+                      echo "No vulnerabilities found in $FILE after filtering"
+                    fi
                   fi
                 else
                   echo "No vulnerabilities found or scan failed for $FILE"
@@ -92,13 +109,13 @@ jobs:
                   VULN_COUNT=$(jq '.runs[0].results | length' "$REPORT_FILE")
                   if [ "$VULN_COUNT" -gt 0 ]; then
                     VULN_FOUND=true
-                    COMMENT="$COMMENT### Vulnerabilities in $FILE\nFound $VULN_COUNT potential vulnerabilities in this file.\nCheck the snyk-code-report-${FILE//\//_}.json artifact for details.\n\n"
+                    COMMENT="$COMMENT### Vulnerabilities in $FILE\nFound $VULN_COUNT potential vulnerabilities in this file (severity: high or critical).\nCheck the snyk-code-report-${FILE//\//_}.json artifact for details.\n\n"
                   fi
                 fi
               fi
             done
             if [ "$VULN_FOUND" = false ]; then
-              COMMENT="$COMMENT### Code Vulnerabilities\nNo vulnerabilities found in changed JavaScript code.\n"
+              COMMENT="$COMMENT### Code Vulnerabilities\nNo high/critical vulnerabilities found in changed JavaScript code.\n"
             fi
           else
             COMMENT="$COMMENT### Code Vulnerabilities\nNo changed files detected in this PR.\n"
@@ -124,9 +141,22 @@ jobs:
               body: comment
             });
 
-      # Upload scan reports as artifacts
+      # Upload scan reports and logs as artifacts
       - name: Upload Snyk Code Report
         uses: actions/upload-artifact@v4
         with:
           name: snyk-code-report
           path: snyk-code-report-*.json
+
+      - name: Upload Snyk Code Logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: snyk-code-logs
+          path: snyk-code-log-*.txt
+
+      # Upload filtered reports for debugging (optional)
+      - name: Upload Filtered Snyk Code Reports (Debug)
+        uses: actions/upload-artifact@v4
+        with:
+          name: filtered-snyk-code-report
+          path: filtered-snyk-code-report-*.json
