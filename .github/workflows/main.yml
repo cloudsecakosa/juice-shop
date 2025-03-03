@@ -5,41 +5,36 @@ on:
     branches:
       - master
     types:
-      - opened      # Trigger on PR creation
-      - synchronize # Trigger on PR updates
-      - reopened    # Trigger if PR is reopened
+      - opened
+      - synchronize
+      - reopened
 
 jobs:
   snyk_code_scan:
     runs-on: ubuntu-latest
-    
+
     steps:
-      # Checkout the repository with full history
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetch full history to compare changes
+          fetch-depth: 0
 
-      # Set up Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '18'
 
-      # Install Snyk CLI
       - name: Install Snyk
         run: npm install -g snyk@latest
 
-      # Get changed files in the PR
       - name: Get Changed Files
         id: changed_files
         run: |
           git fetch origin master
           CHANGED_FILES=$(git diff --name-only origin/master...HEAD | tr '\n' ' ' || true)
-          echo "Changed files: $CHANGED_FILES"  # Debug output
+          echo "Changed files: $CHANGED_FILES"
           echo "files=$CHANGED_FILES" >> "$GITHUB_OUTPUT"
 
-      # Run Snyk code scan on changed JavaScript files only
       - name: Snyk Code Scan
         id: snyk_code_scan
         env:
@@ -50,41 +45,23 @@ jobs:
           if [ -n "$CHANGED_FILES" ]; then
             TOTAL_VULN=0
             for FILE in $CHANGED_FILES; do
-              if [[ "$FILE" == *.js ]]; then  # Only scan JavaScript files for code vulnerabilities
+              if [[ "$FILE" == *.js ]]; then
                 echo "Scanning file: $FILE"
-                # Scan without severity threshold to report all vulnerabilities
                 snyk code test --file="$FILE" --json > "snyk-code-report-${FILE//\//_}.json" 2> "snyk-code-log-${FILE//\//_}.txt" || true
-                # Debug: Show Snyk command output and log file
-                echo "Snyk command output for $FILE: $(cat snyk-code-log-${FILE//\//_}.txt || echo 'No output')"
-                # Check if Snyk scanned only the specified file by inspecting the report
+
                 if [ -s "snyk-code-report-${FILE//\//_}.json" ]; then
-                  # Parse the report to ensure only the specified file has vulnerabilities
                   if jq -e '.runs[0].results | map(.locations[].physicalLocation.artifactLocation.uri) | unique | . == ["'"$FILE"'"]' > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
                     echo "Confirmed scan limited to $FILE"
-                    if jq -e . > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
-                      VULN_COUNT=$(jq '.runs[0].results | length' "snyk-code-report-${FILE//\//_}.json")
-                      echo "Vulnerabilities in $FILE: $VULN_COUNT"
-                      echo "Snyk Code Report Content: $(cat snyk-code-report-${FILE//\//_}.json || echo 'Empty or invalid')"
-                      TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
-                    else
-                      echo "Invalid JSON in snyk-code-report-${FILE//\//_}.json, skipping"
-                    fi
+                    VULN_COUNT=$(jq '.runs[0].results | length' "snyk-code-report-${FILE//\//_}.json")
+                    TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
                   else
-                    echo "Warning: Snyk scanned files beyond $FILE. Limiting report to $FILE only."
-                    # Filter results to only include vulnerabilities in $FILE
                     jq 'del(.runs[].results[] | select(.locations[].physicalLocation.artifactLocation.uri != "'"$FILE"'"))' "snyk-code-report-${FILE//\//_}.json" > "filtered-snyk-code-report-${FILE//\//_}.json"
-                    if [ -s "filtered-snyk-code-report-${FILE//\//_}.json" ] && jq -e . > /dev/null 2>&1 < "filtered-snyk-code-report-${FILE//\//_}.json"; then
+                    if [ -s "filtered-snyk-code-report-${FILE//\//_}.json" ]; then
                       VULN_COUNT=$(jq '.runs[0].results | length' "filtered-snyk-code-report-${FILE//\//_}.json")
-                      echo "Vulnerabilities in $FILE after filtering: $VULN_COUNT"
-                      echo "Filtered Snyk Code Report Content: $(cat filtered-snyk-code-report-${FILE//\//_}.json || echo 'Empty or invalid')"
                       TOTAL_VULN=$((TOTAL_VULN + VULN_COUNT))
                       mv "filtered-snyk-code-report-${FILE//\//_}.json" "snyk-code-report-${FILE//\//_}.json"
-                    else
-                      echo "No vulnerabilities found in $FILE after filtering"
                     fi
                   fi
-                else
-                  echo "No vulnerabilities found or scan failed for $FILE"
                 fi
               fi
             done
@@ -93,40 +70,59 @@ jobs:
             echo "code_vuln_count=0" >> $GITHUB_OUTPUT
           fi
 
-      # Generate comment based on scan results for changed JavaScript files only, simplified for developers
       - name: Generate Scan Comment
         id: comment
         run: |
           COMMENT="## Snyk Code Scan Results for OWASP Juice Shop PR Changes\n\n"
-          
+
           CHANGED_FILES="${{ steps.changed_files.outputs.files }}"
           if [ -n "$CHANGED_FILES" ]; then
             VULN_FOUND=false
             for FILE in $CHANGED_FILES; do
-              if [[ "$FILE" == *.js ]]; then  # Only consider JavaScript files
+              if [[ "$FILE" == *.js ]]; then
                 REPORT_FILE="snyk-code-report-${FILE//\//_}.json"
                 if [ -s "$REPORT_FILE" ] && jq -e . > /dev/null 2>&1 < "$REPORT_FILE"; then
                   VULN_COUNT=$(jq '.runs[0].results | length' "$REPORT_FILE")
                   if [ "$VULN_COUNT" -gt 0 ]; then
                     VULN_FOUND=true
-                    # Simplified comment without severity specification
-                    COMMENT="$COMMENT### Vulnerabilities in $FILE\nFound $VULN_COUNT potential vulnerabilities in this file.\nTo view details, download the snyk-code-report-${FILE//\//_}.json artifact from the GitHub Actions run and use a JSON viewer or 'jq' tool (e.g., `jq '.runs[0].results[] | {ruleId, message, locations}' snyk-code-report-${FILE//\//_}.json`).\n\n"
+                    COMMENT="$COMMENT### Vulnerabilities in \`$FILE\`\n\n"
+                    COMMENT="$COMMENTFound $VULN_COUNT potential vulnerabilities in this file.\n"
+                    COMMENT="$COMMENTTo view details, download the \`snyk-code-report-${FILE//\//_}.json\` artifact from GitHub Actions.\n\n"
+
+                    jq -c '.runs[0].results[]' "$REPORT_FILE" | while read -r vuln; do
+                      RULE_ID=$(echo "$vuln" | jq -r '.ruleId')
+                      DESCRIPTION=$(echo "$vuln" | jq -r '.message.text')
+
+                      START_LINE=$(echo "$vuln" | jq -r '.locations[0].physicalLocation.region.startLine')
+                      END_LINE=$(echo "$vuln" | jq -r '.locations[0].physicalLocation.region.endLine')
+                      START_COLUMN=$(echo "$vuln" | jq -r '.locations[0].physicalLocation.region.startColumn')
+                      END_COLUMN=$(echo "$vuln" | jq -r '.locations[0].physicalLocation.region.endColumn')
+
+                      COMMENT="$COMMENT### ⚠️ Vulnerability\n"
+                      COMMENT="$COMMENT- **Rule ID:** $RULE_ID\n"
+                      COMMENT="$COMMENT- **Description:** $DESCRIPTION\n"
+                      COMMENT="$COMMENT- **Location:**\n"
+                      COMMENT="$COMMENT    - **Start Line:** $START_LINE\n"
+                      COMMENT="$COMMENT    - **End Line:** $END_LINE\n"
+                      COMMENT="$COMMENT    - **Start Column:** $START_COLUMN\n"
+                      COMMENT="$COMMENT    - **End Column:** $END_COLUMN\n\n"
+                    done
                   fi
                 fi
               fi
             done
+
             if [ "$VULN_FOUND" = false ]; then
               COMMENT="$COMMENT### Code Vulnerabilities\nNo vulnerabilities found in changed JavaScript code.\n"
             fi
           else
             COMMENT="$COMMENT### Code Vulnerabilities\nNo changed files detected in this PR.\n"
           fi
-          
+
           echo "body<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMENT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      # Post comment to PR
       - name: Comment on PR
         uses: actions/github-script@v6
         with:
@@ -140,7 +136,6 @@ jobs:
               body: comment
             });
 
-      # Upload scan reports and logs as artifacts
       - name: Upload Snyk Code Report
         uses: actions/upload-artifact@v4
         with:
@@ -153,7 +148,6 @@ jobs:
           name: snyk-code-logs
           path: snyk-code-log-*.txt
 
-      # Upload filtered reports for debugging (optional)
       - name: Upload Filtered Snyk Code Reports (Debug)
         uses: actions/upload-artifact@v4
         with:
