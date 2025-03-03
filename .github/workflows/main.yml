@@ -46,6 +46,7 @@ jobs:
             for FILE in $CHANGED_FILES; do
               if [[ "$FILE" == *.js ]]; then
                 snyk code test --file="$FILE" --json > "snyk-code-report-${FILE//\//_}.json" 2> "snyk-code-log-${FILE//\//_}.txt" || true
+
                 if [ -s "snyk-code-report-${FILE//\//_}.json" ]; then
                   if jq -e '.runs[0].results | map(.locations[].physicalLocation.artifactLocation.uri) | unique | . == ["'"$FILE"'"]' > /dev/null 2>&1 < "snyk-code-report-${FILE//\//_}.json"; then
                     VULN_COUNT=$(jq '.runs[0].results | length' "snyk-code-report-${FILE//\//_}.json")
@@ -72,6 +73,7 @@ jobs:
           COMMENT="## Snyk Code Scan Results for OWASP Juice Shop PR Changes
 
 "
+
           CHANGED_FILES="${{ steps.changed_files.outputs.files }}"
           if [ -n "$CHANGED_FILES" ]; then
             VULN_FOUND=false
