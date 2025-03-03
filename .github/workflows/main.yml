@@ -30,6 +30,10 @@ jobs:
       - name: Install Snyk
         run: npm install -g snyk@latest
 
+      # Check Snyk Version
+      - name: Check Snyk Version
+        run: snyk --version
+
       # Get changed files in the PR
       - name: Get Changed Files
         id: changed_files
@@ -39,7 +43,7 @@ jobs:
           echo "Changed files: $CHANGED_FILES"  # Debug output
           echo "files=$CHANGED_FILES" >> "$GITHUB_OUTPUT"
 
-      # Run Snyk code scan on changed JavaScript files only
+      # Run Snyk code scan on changed JavaScript files only, with enhanced debugging
       - name: Snyk Code Scan
         id: snyk_code_scan
         env:
@@ -52,7 +56,7 @@ jobs:
             for FILE in $CHANGED_FILES; do
               if [[ "$FILE" == *.js ]]; then  # Only scan JavaScript files for code vulnerabilities
                 echo "Scanning file: $FILE"
-                # Scan without severity threshold to report all vulnerabilities
+                # Scan without severity threshold to report all vulnerabilities, with detailed output
                 snyk code test --file="$FILE" --json > "snyk-code-report-${FILE//\//_}.json" 2> "snyk-code-log-${FILE//\//_}.txt" || true
                 # Debug: Show Snyk command output and log file
                 echo "Snyk command output for $FILE: $(cat snyk-code-log-${FILE//\//_}.txt || echo 'No output')"
@@ -93,7 +97,7 @@ jobs:
             echo "code_vuln_count=0" >> $GITHUB_OUTPUT
           fi
 
-      # Generate comment based on scan results for changed JavaScript files only, with header and summary
+      # Generate comment based on scan results for changed JavaScript files only, with header, summary, and detailed vulnerabilities
       - name: Generate Scan Comment
         id: comment
         run: |
