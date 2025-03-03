@@ -109,46 +109,51 @@ jobs:
       - name: Generate Scan Comment
         id: comment
         run: |
-          cat << 'EOF' > "$GITHUB_OUTPUT"
-          body<<EOF
-          ## Snyk Code Scan Results for OWASP Juice Shop PR Changes
-
-          EOF
-          
-          CHANGED_FILES="${{ steps.changed_files.outputs.files }}"
-          if [ -n "$CHANGED_FILES" ]; then
-            VULN_FOUND=false
-            for FILE in $CHANGED_FILES; do
-              if [[ "$FILE" == *.js ]]; then
-                REPORT_FILE="snyk-code-report-${FILE//\//_}.json"
-                if [ -s "$REPORT_FILE" ]; then
-                  # Use jq with error handling to count vulnerabilities
-                  VULN_COUNT=$(jq '.runs[0].results | length // 0' "$REPORT_FILE" 2>/dev/null || echo 0)
-                  if [ "$VULN_COUNT" -gt 0 ]; then
-                    VULN_FOUND=true
-                    COMMENT="### Vulnerabilities in \"$FILE\"\nFound $VULN_COUNT potential vulnerabilities in this file:\n"
-                    # List vulnerabilities with text and line range for simplicity
-                    for ((i=0; i<$VULN_COUNT; i++)); do
-                      VULN_TEXT=$(jq -r '.runs[0].results['"$i"'].message.text // "No description available"' "$REPORT_FILE" 2>/dev/null || echo "No description available")
-                      START_LINE=$(jq -r '.runs[0].results['"$i"'].locations[0].physicalLocation.region.startLine // "Unknown"' "$REPORT_FILE" 2>/dev/null || echo "Unknown")
-                      END_LINE=$(jq -r '.runs[0].results['"$i"'].locations[0].physicalLocation.region.endLine // "Unknown"' "$REPORT_FILE" 2>/dev/null || echo "Unknown")
-                      COMMENT="$COMMENT- $VULN_TEXT (Lines $START_LINE–$END_LINE)\n"
-                    done
-                    echo "$COMMENTTo view details, download the \"snyk-code-report-${FILE//\//_}.json\" artifact from GitHub Actions.\n\n" >> "$GITHUB_OUTPUT"
+          {
+            echo "body<<EOF"
+            echo "## Snyk Code Scan Results for OWASP Juice Shop PR Changes"
+            echo ""
+            
+            CHANGED_FILES="${{ steps.changed_files.outputs.files }}"
+            if [ -n "$CHANGED_FILES" ]; then
+              VULN_FOUND=false
+              for FILE in $CHANGED_FILES; do
+                if [[ "$FILE" == *.js ]]; then
+                  REPORT_FILE="snyk-code-report-${FILE//\//_}.json"
+                  if [ -s "$REPORT_FILE" ]; then
+                    # Use jq with error handling to count vulnerabilities
+                    VULN_COUNT=$(jq '.runs[0].results | length // 0' "$REPORT_FILE" 2>/dev/null || echo 0)
+                    if [ "$VULN_COUNT" -gt 0 ]; then
+                      VULN_FOUND=true
+                      echo "### Vulnerabilities in \"$FILE\""
+                      echo "Found $VULN_COUNT potential vulnerabilities in this file:"
+                      # List vulnerabilities with text and line range for simplicity
+                      for ((i=0; i<$VULN_COUNT; i++)); do
+                        VULN_TEXT=$(jq -r '.runs[0].results['"$i"'].message.text // "No description available"' "$REPORT_FILE" 2>/dev/null || echo "No description available")
+                        START_LINE=$(jq -r '.runs[0].results['"$i"'].locations[0].physicalLocation.region.startLine // "Unknown"' "$REPORT_FILE" 2>/dev/null || echo "Unknown")
+                        END_LINE=$(jq -r '.runs[0].results['"$i"'].locations[0].physicalLocation.region.endLine // "Unknown"' "$REPORT_FILE" 2>/dev/null || echo "Unknown")
+                        echo "- $VULN_TEXT (Lines $START_LINE–$END_LINE)"
+                      done
+                      echo "To view details, download the \"snyk-code-report-${FILE//\//_}.json\" artifact from GitHub Actions."
+                      echo ""
+                    fi
+                  else
+                    echo "Report file $REPORT_FILE is empty or invalid, skipping" >&2
                   fi
-                else
-                  echo "Report file $REPORT_FILE is empty or invalid, skipping" >&2
                 fi
+              done
+              if [ "$VULN_FOUND" = false ]; then
+                echo "### Code Vulnerabilities"
+                echo "No vulnerabilities found in changed JavaScript code."
+                echo ""
               fi
-            done
-            if [ "$VULN_FOUND" = false ]; then
-              echo "### Code Vulnerabilities\nNo vulnerabilities found in changed JavaScript code.\n" >> "$GITHUB_OUTPUT"
+            else
+              echo "### Code Vulnerabilities"
+              echo "No changed files detected in this PR."
+              echo ""
             fi
-          else
-            echo "### Code Vulnerabilities\nNo changed files detected in this PR.\n" >> "$GITHUB_OUTPUT"
-          fi
-          EOF
-          EOF
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       # Post comment to PR
       - name: Comment on PR
