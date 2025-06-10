@@ -1,0 +1,55 @@
+name: Dynamic Application Security Testing (DAST)
+
+on:
+  workflow_run:
+    workflows: ["Deploy to Staging"]
+    types:
+      - completed
+  schedule:
+    - cron: '0 3 * * 2'  # Weekly Tuesday 3AM
+
+jobs:
+  dast-scan:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: OWASP ZAP Full Scan
+      uses: zaproxy/action-full-scan@v0.10.0
+      with:
+        target: ${{ vars.STAGING_URL }}
+        rules_file_name: '.zap/rules.tsv'
+        cmd_options: '-a'
+    
+    - name: OWASP ZAP Baseline Scan
+      uses: zaproxy/action-baseline@v0.12.0
+      with:
+        target: ${{ vars.STAGING_URL }}
+        rules_file_name: '.zap/rules.tsv'
+    
+    - name: Create ZAP rules file
+      run: |
+        mkdir -p .zap
+        echo -e "10010\tIGNORE\tCookie No HttpOnly Flag" > .zap/rules.tsv
+        echo -e "10011\tIGNORE\tCookie Without Secure Flag" >> .zap/rules.tsv
+    
+    - name: Upload DAST results to AutoSec
+      env:
+        AUTOSEC_API_KEY: ${{ secrets.AUTOSEC_API_KEY }}
+        AUTOSEC_ENDPOINT: ${{ vars.AUTOSEC_ENDPOINT }}
+      run: |
+        if [ -f report_json.json ]; then
+          curl -X POST "$AUTOSEC_ENDPOINT/api/smart-sast/upload" \
+            -H "Authorization: Bearer $AUTOSEC_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"scanType\": \"dast\",
+              \"repoName\": \"${{ github.repository }}\",
+              \"branch\": \"${{ github.ref_name }}\",
+              \"commitHash\": \"${{ github.sha }}\",
+              \"scanData\": $(cat report_json.json)
+            }"
+        fi
