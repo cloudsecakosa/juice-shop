@@ -2,9 +2,9 @@ name: SmartSAST - AI-Enhanced Security Analysis
 
 on:
   push:
-    branches: [ master, develop ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
   schedule:
     - cron: '0 1 * * *'  # Daily at 1AM
 
