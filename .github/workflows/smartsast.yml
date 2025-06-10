@@ -2,9 +2,9 @@ name: SmartSAST - AI-Enhanced Security Analysis
 
 on:
   push:
-    branches: [ master, develop ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
   schedule:
     - cron: '0 1 * * *'  # Daily at 1AM
 
@@ -29,10 +29,6 @@ jobs:
       with:
         node-version: '18'
         cache: 'npm'
-        cache-dependency-path: |
-          package-lock.json
-          yarn.lock
-          pnpm-lock.yaml
     
     - name: Setup Python (if applicable)
       if: hashFiles('requirements.txt', 'pyproject.toml', '*.py') != ''
